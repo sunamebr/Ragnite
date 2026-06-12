@@ -24,10 +24,10 @@ This creates / merges (never clobbering existing config):
 | `.ragnite/config.toml` | invoke-mode knobs (strict, budgets, thresholds) |
 | `.ragnite/session.json` | runtime state (starts **inactive**) |
 
-Hook and MCP commands use the absolute interpreter
-(`"<python>" -m ragnite.cli ...`), so they work regardless of PATH or venv
-activation. Restart the Claude Code session after installing so hooks, skill
-and MCP server load.
+Hook and MCP commands use the absolute interpreter of the environment that
+ran the installer — e.g. `/path/to/python -m ragnite.cli claude hook ...` —
+so they work regardless of PATH or venv activation. Restart the Claude Code
+session after installing so hooks, skill and MCP server load.
 
 ## Bootstrap: `/ragnite init`
 

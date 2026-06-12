@@ -3,6 +3,27 @@
 All notable changes to Ragnite are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com); versioning follows SemVer.
 
+## [0.3.1] - 2026-06-12
+
+Release polish — consistency, docs and release hygiene. No new features.
+
+### Fixed
+- Unified the test count across CHANGELOG and release notes (103 tests; the
+  v0.3.0 entry previously said 99 from before the final regression tests).
+- Markdown rendering: raw `<ragnite-context ...>` markup in README/CHANGELOG
+  tables could be swallowed as an HTML tag by some renderers — now referenced
+  as a `ragnite-context` block, with the full example kept in a fenced block
+  in docs/invoke-mode.md.
+- docs: the absolute-interpreter examples showed a `<python>` placeholder that
+  rendered confusingly — now `/path/to/python -m ragnite.cli ...`.
+- Release workflow: the GitHub Release is created from the tag even when PyPI
+  trusted publishing isn't configured yet (PyPI step is non-blocking until
+  then).
+
+### Added
+- README: tagline ("Ragnite makes Claude Code remember before it reasons
+  again.") and a 30-second TL;DR quickstart at the top.
+
 ## [0.3.0] - 2026-06-12
 
 ### Added — Invoke Mode for Claude Code (event-driven live context injection)
@@ -26,8 +47,8 @@ All notable changes to Ragnite are documented here. Format follows
     counts); on `source=compact`, captures the compaction summary as a
     *candidate* episode before re-grounding.
   - **UserPromptSubmit**: recall on the (redacted) prompt → injects a
-    `<ragnite-context mode=... confidence=...>` block with suggestion,
-    evidence and sources; silent on `refuse_guess`/low confidence.
+    `ragnite-context` XML-style block (mode, confidence, suggestion,
+    evidence, sources); silent on `refuse_guess`/low confidence.
   - **PreToolUse** (Grep|Glob): advisory by default — never blocks; opt-in
     `strict` mode denies broad searches that memory answers `direct`.
   - **PostToolUse** (Edit/Write/...): incremental Code Memory re-index of the
@@ -41,7 +62,7 @@ All notable changes to Ragnite are documented here. Format follows
   sensitive files (`.env*`, keys, credentials) never ingested;
   `.ragniteignore` support.
 - Docs: `claude-code.md`, `invoke-mode.md`, `hooks.md`, `security.md`.
-- 26 new tests (99 total): installer merge safety/idempotency, prompt
+- 30 new tests (103 total): installer merge safety/idempotency, prompt
   injection contract, episodic learning + supersession, incremental re-index
   + cache invalidation, strict-mode denial, redaction, bootstrap seeding.
 

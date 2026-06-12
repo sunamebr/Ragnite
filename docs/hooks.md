@@ -21,18 +21,18 @@ Installed entries in `.claude/settings.local.json` (appended by
 {
   "hooks": {
     "SessionStart": [
-      {"hooks": [{"type": "command", "command": "\"<python>\" -m ragnite.cli claude hook session-start", "timeout": 60}]}
+      {"hooks": [{"type": "command", "command": "/path/to/python -m ragnite.cli claude hook session-start", "timeout": 60}]}
     ],
     "UserPromptSubmit": [
-      {"hooks": [{"type": "command", "command": "\"<python>\" -m ragnite.cli claude hook user-prompt", "timeout": 30}]}
+      {"hooks": [{"type": "command", "command": "/path/to/python -m ragnite.cli claude hook user-prompt", "timeout": 30}]}
     ],
     "PreToolUse": [
       {"matcher": "Grep|Glob",
-       "hooks": [{"type": "command", "command": "\"<python>\" -m ragnite.cli claude hook pre-tool", "timeout": 15}]}
+       "hooks": [{"type": "command", "command": "/path/to/python -m ragnite.cli claude hook pre-tool", "timeout": 15}]}
     ],
     "PostToolUse": [
       {"matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
-       "hooks": [{"type": "command", "command": "\"<python>\" -m ragnite.cli claude hook post-tool", "timeout": 60}]}
+       "hooks": [{"type": "command", "command": "/path/to/python -m ragnite.cli claude hook post-tool", "timeout": 60}]}
     ]
   }
 }

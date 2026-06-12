@@ -16,10 +16,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Build
         run: uv build
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
       - name: GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+      - name: Publish to PyPI
+        # Non-blocking until PyPI trusted publishing is configured for this repo
+        # (https://docs.pypi.org/trusted-publishers/). Remove continue-on-error then.
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@release/v1

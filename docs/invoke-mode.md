@@ -26,7 +26,7 @@ first, so paused mode costs one JSON read per event and nothing else.
 |---|---|---|
 | **SessionStart** (startup/resume/clear) | Build project briefing: brief, active decisions, constraints, memory counts | yes — `additionalContext` |
 | **SessionStart** (compact) | Capture the compaction summary as a *candidate* episode, then re-inject the briefing (re-grounding after context loss) | yes |
-| **UserPromptSubmit** | `recall(prompt)` → verdict + packed context as a `<ragnite-context mode=... confidence=...>` block; nothing injected on `refuse_guess` or low confidence | conditionally |
+| **UserPromptSubmit** | `recall(prompt)` → verdict + packed context as a `ragnite-context` block (example below); nothing injected on `refuse_guess` or low confidence | conditionally |
 | **PreToolUse** (Grep/Glob) | Default: never blocks. `strict = true`: denies broad searches that memory answers `direct`, returning the context in the denial reason | strict only |
 | **PostToolUse** (Edit/Write/...) | Incremental Code Memory re-index of the changed file + semantic cache invalidation | no (silent) |
 | **PostToolUse** (Bash) | Learn *candidate* episodes from test results and failing commands (superseding repeats — one active episode per command) | tiny note when learned |

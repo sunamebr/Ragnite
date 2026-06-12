@@ -11,9 +11,24 @@ Typed memory · confidence scoring · answer modes · token-budgeted context pac
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/style-ruff-261230.svg)](https://github.com/astral-sh/ruff)
 
+**Ragnite makes Claude Code remember before it reasons again.**
+
 </div>
 
 ---
+
+## TL;DR — 30 seconds
+
+```bash
+pip install "ragnite[mcp]"
+cd your-project
+ragnite claude install     # wires /ragnite skill + MCP + hooks (merge-safe)
+# inside Claude Code:
+/ragnite init              # one-time: index code + docs, seed project memory
+/ragnite invoke            # activate live context injection — then just work
+```
+
+Every prompt now arrives with the smallest sufficient project memory and an explicit confidence verdict (`direct` / `cautious` / `ask_clarification` / `search_more` / `refuse_guess`). The agent stops re-reading the repo; what it learns gets written back. Limits & risks: [docs/security.md](docs/security.md) and "[What Ragnite is not](#what-ragnite-is-not)".
 
 ## The problem
 
@@ -104,7 +119,7 @@ ragnite claude install     # skill + MCP + hooks + config (merges, never clobber
 | Session event | What Ragnite does |
 |---|---|
 | SessionStart | injects the project briefing (brief, active decisions, constraints) |
-| UserPromptSubmit | recalls against the prompt → injects `<ragnite-context mode=... confidence=...>` |
+| UserPromptSubmit | recalls against the prompt → injects a `ragnite-context` block (mode, confidence, evidence) |
 | PostToolUse (Edit/Write) | incrementally re-indexes the changed file, invalidates the cache |
 | PostToolUse (Bash) | learns candidate episodes from test runs and failing commands |
 | SessionStart (compact) | captures the compaction summary as a candidate episode, re-grounds |

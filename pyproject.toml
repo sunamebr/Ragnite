@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragnite"
-version = "0.3.0"
+version = "0.3.1"
 description = "Confidence-aware RAG memory engine for LLMs and coding agents: typed memory (fact/decision/episode/code), confidence scoring, answer modes, context packing, semantic cache, hybrid retrieval, MCP server."
 readme = "README.md"
 license = { file = "LICENSE" }
