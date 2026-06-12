@@ -71,6 +71,7 @@ class Answer(BaseModel):
     chunks: list[ScoredChunk] = Field(default_factory=list)
     usage: Usage = Field(default_factory=Usage)
     model: str | None = None
+    cached: bool = False  # True when served from the AnswerCache (no LLM call)
 
 
 class StreamEvent(BaseModel):

@@ -80,6 +80,12 @@ tokens, `RAGNITE_MEMORY_BUDGET`) is a hard cap.
 
 ## Semantic cache semantics
 
+The verdict cache stores the recall verdict (context + mode + signals), **not
+a final LLM answer** — a hit saves retrieval/scoring/packing; generation
+tokens are saved only by the opt-in `AnswerCache` on the document-RAG side.
+Exact promises and the invalidation truth table:
+[semantic-cache.md](semantic-cache.md).
+
 - Keyed by **query embedding**; hit threshold `RAGNITE_CACHE_THRESHOLD` (0.90).
 - TTL `RAGNITE_CACHE_TTL_DAYS` (7).
 - Only `direct` and `cautious` verdicts are cached — uncertainty is recomputed.

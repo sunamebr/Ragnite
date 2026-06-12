@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragnite"
-version = "0.2.0"
+version = "0.3.0"
 description = "Confidence-aware RAG memory engine for LLMs and coding agents: typed memory (fact/decision/episode/code), confidence scoring, answer modes, context packing, semantic cache, hybrid retrieval, MCP server."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -59,6 +59,7 @@ dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
+    "fastapi>=0.115",  # server endpoint tests (TestClient)
 ]
 
 [tool.hatch.build.targets.wheel]

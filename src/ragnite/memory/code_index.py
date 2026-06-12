@@ -152,6 +152,8 @@ class CodeMemory:
         return index
 
     def _records_for(self, rel_path: str, source: str, language: str) -> list[MemoryRecord]:
+        from ragnite.claude.redact import redact  # snippets must never persist secrets
+
         file_hash = _file_hash(source)
         is_test = _is_test_file(rel_path)
         symbols, imports = _python_symbols(source) if language == "python" else _generic_symbols(source)
@@ -165,7 +167,7 @@ class CodeMemory:
             MemoryRecord(
                 kind=MemoryKind.CODE,
                 subject=rel_path,
-                text=(
+                text=redact(
                     f"file {rel_path} ({language}, {len(symbols)} symbols"
                     f"{', test file' if is_test else ''})\n"
                     f"imports: {import_names}\nsymbols: {symbol_names}"
@@ -191,7 +193,10 @@ class CodeMemory:
                 MemoryRecord(
                     kind=MemoryKind.CODE,
                     subject=f"{rel_path}::{symbol.name}",
-                    text=f"{symbol.symbol_type} {symbol.name}{route_note} — {rel_path}:{symbol.line}\n{symbol.snippet}",
+                    text=redact(
+                        f"{symbol.symbol_type} {symbol.name}{route_note} — "
+                        f"{rel_path}:{symbol.line}\n{symbol.snippet}"
+                    ),
                     source=f"{rel_path}:{symbol.line}",
                     tags=tags,
                     metadata=metadata,
@@ -199,7 +204,9 @@ class CodeMemory:
             )
         return records
 
-    async def index_repo(self, path: str | Path) -> CodeIndexStats:
+    async def index_repo(self, path: str | Path, ignore: list[str] | None = None) -> CodeIndexStats:
+        from ragnite.claude.redact import is_ignored, is_sensitive_path
+
         root = Path(path)
         existing = await self._existing()
         stats = CodeIndexStats()
@@ -214,8 +221,10 @@ class CodeMemory:
             if candidate.stat().st_size > self.max_file_bytes:
                 continue
             rel_path = candidate.relative_to(root).as_posix() if root.is_dir() else candidate.name
+            if is_sensitive_path(candidate) or (ignore and is_ignored(rel_path, ignore)):
+                continue
             seen_files.add(rel_path)
-            source = candidate.read_text(encoding="utf-8", errors="replace")
+            source = candidate.read_text(encoding="utf-8-sig", errors="replace")
 
             previous = existing.get(rel_path)
             if previous and previous[0] == _file_hash(source):
@@ -234,6 +243,42 @@ class CodeMemory:
                 await self.bank.delete(ids)
                 stats.files_removed += 1
         return stats
+
+    async def index_file(self, root: str | Path, file_path: str | Path) -> bool:
+        """Incrementally (re-)index a single file. Returns True when records changed.
+
+        Used by invoke-mode's PostToolUse hook so edits made during a Claude
+        Code session keep Code Memory fresh without a full repo walk.
+        """
+        from ragnite.claude.redact import is_ignored, is_sensitive_path, load_ragniteignore
+
+        root = Path(root).resolve()
+        candidate = Path(file_path)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        if candidate.suffix.lower() not in CODE_SUFFIXES or not candidate.is_file():
+            return False
+        try:
+            rel_path = candidate.resolve().relative_to(root).as_posix()
+        except ValueError:
+            return False  # outside the project root
+        if any(part in IGNORED_DIRS for part in Path(rel_path).parts):
+            return False
+        if is_sensitive_path(candidate) or is_ignored(rel_path, load_ragniteignore(root)):
+            return False
+        if candidate.stat().st_size > self.max_file_bytes:
+            return False
+
+        source = candidate.read_text(encoding="utf-8-sig", errors="replace")
+        existing = await self._existing()
+        previous = existing.get(rel_path)
+        if previous and previous[0] == _file_hash(source):
+            return False
+        if previous:
+            await self.bank.delete(previous[1])
+        language = CODE_SUFFIXES[candidate.suffix.lower()]
+        await self.bank.add(self._records_for(rel_path, source, language))
+        return True
 
     async def graph(self) -> dict[str, list[str]]:
         """File -> imports map from the indexed records (module relations)."""

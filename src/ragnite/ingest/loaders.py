@@ -63,7 +63,9 @@ IGNORED_DIRS = {
     "venv",
     "dist",
     "build",
+    "vendor",
     ".ragnite",
+    ".claude",
     ".idea",
     ".vscode",
     "target",
@@ -98,7 +100,8 @@ class _HTMLTextExtractor(HTMLParser):
 
 
 def _read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="replace")
+    # utf-8-sig: transparently strips a BOM when present (no-op otherwise)
+    return path.read_text(encoding="utf-8-sig", errors="replace")
 
 
 def _load_html(path: Path) -> str:

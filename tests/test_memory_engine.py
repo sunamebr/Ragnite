@@ -87,6 +87,40 @@ async def test_kind_filter_and_stats(memory):
     assert stats["records"] == 2
 
 
+async def test_conflict_resolved_by_supersession_and_forget(memory):
+    a = await memory.remember_fact("The database listens on port 5432.", subject="db-port")
+    b = await memory.remember_fact("The database listens on port 5433.", subject="db-port")
+    conflicted = await memory.recall("which port does the database use?", use_cache=False)
+    assert conflicted.mode == "ask_clarification"
+
+    # the agent asks, the user arbitrates: retire the loser, supersede the rest
+    await memory.forget(b.id)
+    await memory.remember_decision(
+        "The database listens on port 5432 (confirmed).", subject="db-port", supersedes=a.id
+    )
+    resolved = await memory.recall("which port does the database use?", use_cache=False)
+    assert resolved.signals.conflict is False
+    assert resolved.mode != "ask_clarification"
+
+
+async def test_index_repo_and_forget_invalidate_cache(memory, tmp_path):
+    await memory.remember_fact("The deploy pipeline runs on GitHub Actions.", subject="deploy-ci")
+    warm = await memory.recall("what runs the deploy pipeline?")
+    assert warm.cached is False
+    assert (await memory.recall("what runs the deploy pipeline?")).cached is True
+
+    repo = tmp_path / "tiny-repo"
+    repo.mkdir()
+    (repo / "main.py").write_text("def run():\n    pass\n", encoding="utf-8")
+    await memory.index_repo(repo)
+    assert (await memory.recall("what runs the deploy pipeline?")).cached is False
+
+    record = await memory.remember_fact("Temp fact.", subject="tmp")
+    await memory.recall("temp fact?")
+    await memory.forget(record.id)
+    assert (await memory.recall("temp fact?")).cached is False
+
+
 async def test_forget(memory):
     record = await memory.remember_fact("Temporary wrong fact.", subject="oops")
     assert await memory.forget(record.id) is True

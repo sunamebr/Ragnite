@@ -67,9 +67,15 @@ def create_app(engine: RagEngine | None = None, config: RagniteConfig | None = N
     if FastAPI is None:
         raise MissingDependencyError("fastapi", "server")
 
+    from ragnite import __version__
+
     cfg = config or RagniteConfig.from_env()
     rag = engine or build_engine(cfg)
-    app = FastAPI(title="Ragnite", version="0.1.0", description="Production-grade RAG API")
+    app = FastAPI(
+        title="Ragnite",
+        version=__version__,
+        description="Confidence-aware RAG memory engine for LLMs and coding agents.",
+    )
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
     async def require_auth(request: Request) -> None:
@@ -91,15 +97,18 @@ def create_app(engine: RagEngine | None = None, config: RagniteConfig | None = N
     async def ingest(body: IngestRequest) -> dict:
         from ragnite.types import Document
 
-        docs = [
-            Document(
-                text=item["text"],
-                source=item.get("source"),
-                metadata=item.get("metadata") or {},
-            )
-            for item in body.documents
-            if item.get("text", "").strip()
-        ]
+        docs = []
+        for item in body.documents:
+            if not item.get("text", "").strip():
+                continue
+            kwargs = {
+                "text": item["text"],
+                "source": item.get("source"),
+                "metadata": item.get("metadata") or {},
+            }
+            if item.get("id"):  # stable ids enable eval datasets and upsert-by-id
+                kwargs["id"] = item["id"]
+            docs.append(Document(**kwargs))
         if not docs:
             raise HTTPException(status_code=422, detail="no non-empty documents provided")
         result = await rag.ingest_documents(docs)

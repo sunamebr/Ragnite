@@ -18,6 +18,20 @@ import json
 
 from ragnite.config import RagniteConfig, build_engine, build_memory_engine
 from ragnite.errors import MissingDependencyError
+from ragnite.memory.types import MemoryAnswer
+
+
+def recall_payload(answer: MemoryAnswer) -> dict:
+    """The stable JSON contract returned by the MCP ``recall`` tool."""
+    return {
+        "mode": answer.mode,
+        "confidence": answer.confidence,
+        "suggestion": answer.suggestion,
+        "context": answer.context,
+        "tokens": answer.tokens,
+        "cached": answer.cached,
+        "signals": answer.signals.model_dump(),
+    }
 
 
 def create_mcp_server():
@@ -44,19 +58,7 @@ def create_mcp_server():
         Optional kinds filter: comma-separated among fact,decision,episode,code."""
         kind_list = [MemoryKind(k.strip()) for k in kinds.split(",") if k.strip()] if kinds else None
         answer = await memory.recall(query, kinds=kind_list, budget_tokens=budget_tokens)
-        return json.dumps(
-            {
-                "mode": answer.mode,
-                "confidence": answer.confidence,
-                "suggestion": answer.suggestion,
-                "context": answer.context,
-                "tokens": answer.tokens,
-                "cached": answer.cached,
-                "signals": answer.signals.model_dump(),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+        return json.dumps(recall_payload(answer), ensure_ascii=False, indent=2)
 
     @mcp.tool()
     async def remember(text: str, kind: str = "fact", subject: str = "", source: str = "") -> str:

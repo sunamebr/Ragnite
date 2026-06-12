@@ -54,6 +54,40 @@ async def test_ask_without_llm_raises(tmp_path):
         await rag.ask("anything")
 
 
+async def test_answer_cache_skips_the_llm_entirely(tmp_path, fake_chat):
+    from conftest import sample_docs
+    from ragnite.embed.fake import FakeEmbedder
+    from ragnite.memory.semcache import AnswerCache
+
+    rag = RagEngine(
+        store=NativeVectorStore(tmp_path / "col"),
+        embedder=FakeEmbedder(),
+        llm=fake_chat,
+        answer_cache=AnswerCache(embedder=FakeEmbedder(), path=tmp_path / "ac", threshold=0.8),
+    )
+    await rag.ingest_documents(sample_docs())
+
+    first = await rag.ask("Why is Mars red?")
+    assert first.cached is False
+    assert len(fake_chat.calls) == 1
+
+    second = await rag.ask("Why is Mars red?")
+    assert second.cached is True
+    assert second.text == first.text
+    assert len(fake_chat.calls) == 1  # zero LLM calls on the cache hit
+
+    # corpus changed -> cached final answers are invalidated
+    await rag.ingest_text("Mars also has dust storms.", source="extra")
+    third = await rag.ask("Why is Mars red?")
+    assert third.cached is False
+    assert len(fake_chat.calls) == 2
+
+    # streamed path serves the cached answer too
+    events = [event async for event in rag.ask_stream("Why is Mars red?")]
+    assert events[-1].answer.cached is True
+    assert len(fake_chat.calls) == 2
+
+
 async def test_ingest_and_stats(engine):
     stats = await engine.stats()
     assert stats["chunks"] >= 3

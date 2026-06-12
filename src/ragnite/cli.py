@@ -1,9 +1,10 @@
-"""Ragnite CLI."""
+"""Ragnite CLI — confidence-aware RAG memory engine for LLMs and coding agents."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -13,7 +14,11 @@ from ragnite.config import RagniteConfig, build_engine
 
 app = typer.Typer(
     name="ragnite",
-    help="Production-grade RAG: ingest, search, ask, serve, evaluate.",
+    help=(
+        "Confidence-aware RAG memory engine for LLMs and coding agents. "
+        "Memory: remember / recall (verdict + packed context) / index-code. "
+        "Document RAG: ingest / query / ask. Serve over HTTP or MCP; evaluate with eval."
+    ),
     no_args_is_help=True,
     pretty_exceptions_show_locals=False,
 )
@@ -253,6 +258,169 @@ def index_code(
         )
 
     asyncio.run(run())
+
+
+claude_app = typer.Typer(
+    help=(
+        "Claude Code integration: install the /ragnite skill + MCP + hooks, bootstrap the "
+        "project (init), and control event-driven live context injection (invoke/pause)."
+    ),
+    no_args_is_help=True,
+)
+app.add_typer(claude_app, name="claude")
+
+
+@claude_app.command(name="install")
+def claude_install(
+    path: str = typer.Option(".", help="Project root to install into."),
+) -> None:
+    """Install /ragnite skill, MCP server, hooks, and invoke-mode config."""
+    from ragnite.claude.installer import install_into
+
+    for action in install_into(path):
+        console.print(f"[green]+[/green] {action}")
+    console.print(
+        "\nNext: restart Claude Code in this project, then run [bold]/ragnite init[/bold] "
+        "and [bold]/ragnite invoke[/bold]."
+    )
+
+
+@claude_app.command(name="init")
+def claude_init(
+    path: str = typer.Option(None, help="Project root (default: auto-detect)."),
+) -> None:
+    """Bootstrap: index code + docs, seed inferred memories, smoke recall."""
+    from ragnite.claude.bootstrap import run_init
+    from ragnite.claude.session import find_project_root
+
+    root = Path(path) if path else find_project_root()
+    console.print(f"bootstrapping [bold]{root}[/bold] ...")
+    stats = asyncio.run(run_init(root))
+    code = stats["code"]
+    console.print(
+        f"[green]+[/green] code: {code['files_indexed']} files / {code['symbols']} symbols "
+        f"(skipped {code['files_skipped']} unchanged)"
+    )
+    console.print(f"[green]+[/green] docs: {stats['doc_chunks']} chunks from {stats['doc_files']} files")
+    console.print(
+        f"[green]+[/green] seeded {stats['seeded_inferred']} inferred memories "
+        f"(tagged 'inferred' — confirm or correct them)"
+    )
+    for smoke in stats["smoke"]:
+        console.print(
+            f"  smoke recall: [dim]{smoke['query']}[/dim] -> {smoke['mode']} ({smoke['confidence']:.2f})"
+        )
+    counts = stats["memory"]["active_by_kind"]
+    console.print(
+        f"memory: {counts['fact']} facts / {counts['decision']} decisions / "
+        f"{counts['episode']} episodes / {counts['code']} code records"
+    )
+    console.print("\nRun [bold]/ragnite invoke[/bold] to activate live context injection.")
+
+
+def _validate_install(root: Path) -> list[str]:
+    import json as _json
+
+    problems: list[str] = []
+    mcp_file = root / ".mcp.json"
+    try:
+        servers = _json.loads(mcp_file.read_text(encoding="utf-8")).get("mcpServers", {})
+        if "ragnite" not in servers:
+            problems.append(".mcp.json has no 'ragnite' server")
+    except (OSError, _json.JSONDecodeError):
+        problems.append(".mcp.json missing or unreadable")
+    settings_file = root / ".claude" / "settings.local.json"
+    try:
+        raw = settings_file.read_text(encoding="utf-8")
+        if "ragnite.cli claude hook" not in raw:
+            problems.append("hooks not installed in .claude/settings.local.json")
+    except OSError:
+        problems.append(".claude/settings.local.json missing")
+    return problems
+
+
+@claude_app.command(name="invoke")
+def claude_invoke(
+    path: str = typer.Option(None, help="Project root (default: auto-detect)."),
+) -> None:
+    """Activate invoke mode (event-driven live context injection) and print the briefing."""
+    from ragnite.claude.bootstrap import project_config
+    from ragnite.claude.hooks import _briefing
+    from ragnite.claude.session import SessionState, find_project_root, load_invoke_config
+    from ragnite.config import build_memory_engine
+
+    root = Path(path) if path else find_project_root()
+    for problem in _validate_install(root):
+        console.print(f"[yellow]![/yellow] {problem} — run `ragnite claude install` and restart the session")
+
+    state = SessionState(root)
+    state.set_active(True)
+    console.print(
+        "[green]invoke mode: ACTIVE[/green] — context will be injected at session start, "
+        "on each prompt, and after relevant tool calls."
+    )
+
+    engine = build_memory_engine(project_config(root))
+    briefing = asyncio.run(_briefing(engine, load_invoke_config(root)))
+    if briefing:
+        console.print("\n" + briefing)
+    else:
+        console.print("[dim]no memory yet — run /ragnite init first[/dim]")
+    console.print(
+        "\n[dim]Reminder to the assistant: from now on, call the ragnite `recall` MCP tool "
+        "before re-reading or re-analyzing this repository, and obey injected "
+        "<ragnite-context> modes.[/dim]"
+    )
+
+
+@claude_app.command(name="pause")
+def claude_pause(
+    path: str = typer.Option(None, help="Project root (default: auto-detect)."),
+) -> None:
+    """Deactivate invoke mode (memory is kept; injection stops)."""
+    from ragnite.claude.session import SessionState, find_project_root
+
+    root = Path(path) if path else find_project_root()
+    SessionState(root).set_active(False)
+    console.print("[yellow]invoke mode: PAUSED[/yellow] — memory kept; run /ragnite invoke to resume.")
+
+
+@claude_app.command(name="status")
+def claude_status(
+    path: str = typer.Option(None, help="Project root (default: auto-detect)."),
+) -> None:
+    """Show invoke-mode state, stats, and memory counts."""
+    from ragnite.claude.bootstrap import project_config
+    from ragnite.claude.session import SessionState, find_project_root
+    from ragnite.config import build_memory_engine
+
+    root = Path(path) if path else find_project_root()
+    state = SessionState(root)
+
+    async def run() -> dict:
+        engine = build_memory_engine(project_config(root))
+        return await engine.stats()
+
+    info = {
+        "root": str(root),
+        "active": state.active,
+        "stats": state.data.get("stats", {}),
+        "install_problems": _validate_install(root),
+        "memory": asyncio.run(run()),
+    }
+    console.print(json.dumps(info, indent=2, ensure_ascii=False))
+
+
+@claude_app.command(name="hook", hidden=True)
+def claude_hook(event: str = typer.Argument(...)) -> None:
+    """Hook entrypoint (stdin JSON -> stdout JSON). Never fails the session."""
+    import sys
+
+    from ragnite.claude.hooks import run_hook
+
+    output = run_hook(event, sys.stdin.read())
+    if output:
+        sys.stdout.write(output)
 
 
 if __name__ == "__main__":

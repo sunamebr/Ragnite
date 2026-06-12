@@ -101,12 +101,46 @@ async def test_incremental_reindex_and_eviction(tmp_path):
     assert all(r.metadata.get("file") != "util.js" for r in records)
 
 
+async def test_code_records_never_store_secrets(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "client.py").write_text(
+        'def connect():\n    """Connects with key sk-abcdefghijklmnopqrstu."""\n    pass\n',
+        encoding="utf-8",
+    )
+    code = _code_memory(tmp_path)
+    await code.index_repo(repo)
+    records = await code.bank.list(kind=MemoryKind.CODE)
+    assert records
+    assert all("sk-abcdefghijklmnop" not in r.text for r in records)
+    assert any("[REDACTED]" in r.text for r in records)
+
+
 async def test_import_graph(tmp_path):
     code = _code_memory(tmp_path)
     await code.index_repo(_repo(tmp_path))
     graph = await code.graph()
     assert "fastapi" in graph["app.py"]
     assert "os" in graph["app.py"]
+
+
+async def test_index_real_ragnite_memory_package(tmp_path):
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "src" / "ragnite" / "memory"
+    code = _code_memory(tmp_path)
+    stats = await code.index_repo(src)
+    assert stats.files_indexed >= 7
+    assert stats.symbols >= 50
+
+    evidence = await code.bank.recall("confidence scorer class", k=5)
+    top_files = [e.record.metadata.get("file", "") for e in evidence[:5]]
+    assert any("scorer.py" in f for f in top_files)
+
+    # second pass over the real package is a no-op
+    again = await code.index_repo(src)
+    assert again.files_indexed == 0
+    assert again.files_skipped == stats.files_indexed
 
 
 async def test_recall_finds_endpoint_by_question(tmp_path):

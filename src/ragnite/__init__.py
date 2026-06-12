@@ -39,6 +39,7 @@ from ragnite.errors import (
 from ragnite.ingest import load_path, load_text
 from ragnite.llm import ChatModel, LLMResponse, OpenAICompatChat
 from ragnite.memory import (
+    AnswerCache,
     AnswerMode,
     CodeIndexStats,
     CodeMemory,
@@ -78,7 +79,7 @@ from ragnite.types import (
     Usage,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "__version__",
@@ -103,6 +104,7 @@ __all__ = [
     "ContextPacker",
     "PackedContext",
     "SemanticCache",
+    "AnswerCache",
     "CodeMemory",
     "CodeIndexStats",
     # types

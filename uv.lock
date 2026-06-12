@@ -1584,7 +1584,7 @@ wheels = [
 
 [[package]]
 name = "ragnite"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -1630,6 +1630,7 @@ server = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "fastapi" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -1657,6 +1658,7 @@ provides-extras = ["anthropic", "server", "mcp", "qdrant", "local", "pdf", "docx
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "fastapi", specifier = ">=0.115" },
     { name = "pytest", specifier = ">=8.2" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "ruff", specifier = ">=0.6" },

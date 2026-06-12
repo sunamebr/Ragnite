@@ -54,9 +54,10 @@ class RagniteConfig(BaseModel):
     retrieval: RetrievalConfig = RetrievalConfig()
 
     # memory engine
-    cache_threshold: float = 0.90  # semantic cache similarity cutoff
+    cache_threshold: float = 0.90  # semantic (verdict) cache similarity cutoff
     cache_ttl_days: float = 7.0
     memory_budget_tokens: int = 2000  # default context-packer budget
+    answer_cache: bool = False  # opt-in final-answer cache for RagEngine.ask
 
     host: str = "127.0.0.1"
     port: int = 8000
@@ -82,6 +83,7 @@ class RagniteConfig(BaseModel):
             cache_threshold=float(_env("RAGNITE_CACHE_THRESHOLD", "0.90")),
             cache_ttl_days=float(_env("RAGNITE_CACHE_TTL_DAYS", "7")),
             memory_budget_tokens=int(_env("RAGNITE_MEMORY_BUDGET", "2000")),
+            answer_cache=_env("RAGNITE_ANSWER_CACHE", "0") in {"1", "true", "yes"},
             host=_env("RAGNITE_HOST", "127.0.0.1"),
             port=int(_env("RAGNITE_PORT", "8000")),
             api_key=_env("RAGNITE_API_KEY") or None,
@@ -193,15 +195,28 @@ def build_reranker(cfg: RagniteConfig, llm: ChatModel | None) -> Reranker | None
 def build_engine(cfg: RagniteConfig | None = None) -> RagEngine:
     cfg = cfg or RagniteConfig.from_env()
     llm = build_llm(cfg)
+    embedder = build_embedder(cfg)
+
+    answer_cache = None
+    if cfg.answer_cache:
+        from ragnite.memory.semcache import AnswerCache
+
+        answer_cache = AnswerCache(
+            embedder=embedder,
+            path=cfg.data_dir / "answer_cache",
+            ttl_days=cfg.cache_ttl_days,
+        )
+
     return RagEngine(
         store=build_store(cfg),
-        embedder=build_embedder(cfg),
+        embedder=embedder,
         llm=llm,
         reranker=build_reranker(cfg, llm),
         retrieval=cfg.retrieval,
         chunk_size=cfg.chunk_size,
         chunk_overlap=cfg.chunk_overlap,
         contextual=cfg.contextual,
+        answer_cache=answer_cache,
     )
 
 

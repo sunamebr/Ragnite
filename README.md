@@ -77,15 +77,41 @@ Confidence blends seven signals — **top similarity, mean similarity, source co
 
 Greedy value-ordered packing under a token budget (default 2000), near-duplicate suppression, compact one-line headers with kind/similarity/age/provenance. The LLM gets evidence, not prose.
 
-### Semantic Cache
+### Semantic caching — two caches, two honest promises
 
-Queries are cached by embedding; an equivalent question returns the previous verdict + context with **zero retrieval, zero scoring, zero LLM tokens**. TTL-bounded, invalidated on memory writes.
+- **Verdict cache** (on by default for `recall`): an equivalent question returns the previous packed context + verdict — **zero retrieval, zero scoring, zero packing**. The host still spends LLM tokens if it forwards that context to a model.
+- **AnswerCache** (opt-in, `RAGNITE_ANSWER_CACHE=1`, for document-RAG `ask`): caches the **finished generated answer** — a hit is **genuinely zero LLM tokens** (`answer.cached == True`, no model call). Stricter threshold (0.93) and shorter TTL (3d), because serving a wrong final answer is worse than recomputing.
+
+Both are TTL-bounded and invalidated on writes (memory writes clear the verdict cache; ingestion clears the answer cache). Full contract: [docs/semantic-cache.md](docs/semantic-cache.md).
 
 ### Code Memory
 
 `index_repo()` parses the repository into memory: Python via AST (functions, classes, methods, docstrings, imports, FastAPI/Flask-style routes), other languages via definition-boundary extraction. Incremental — unchanged files are hash-skipped, deleted files evicted. "Where is auth handled?" becomes one recall instead of a directory crawl.
 
-## Plug it into Claude Code (MCP)
+## Plug it into Claude Code
+
+**Invoke Mode** — the full experience: one installer wires the `/ragnite` skill, the MCP server, and session hooks for **event-driven live context injection**. After that you just work; Ragnite injects memory before prompts, learns from tool calls, and re-indexes files you edit.
+
+```bash
+pip install "ragnite[mcp]"
+ragnite claude install     # skill + MCP + hooks + config (merges, never clobbers)
+# inside Claude Code:
+#   /ragnite init          heavy bootstrap: index code+docs, seed memories, smoke recall
+#   /ragnite invoke        activate live context injection
+#   /ragnite pause|status  control & inspect
+```
+
+| Session event | What Ragnite does |
+|---|---|
+| SessionStart | injects the project briefing (brief, active decisions, constraints) |
+| UserPromptSubmit | recalls against the prompt → injects `<ragnite-context mode=... confidence=...>` |
+| PostToolUse (Edit/Write) | incrementally re-indexes the changed file, invalidates the cache |
+| PostToolUse (Bash) | learns candidate episodes from test runs and failing commands |
+| SessionStart (compact) | captures the compaction summary as a candidate episode, re-grounds |
+
+Default mode never blocks tools; opt-in `strict = true` denies broad Grep/Glob searches that memory already answers `direct`. Secrets are redacted before anything is stored; `.env*`, keys and `.ragniteignore` paths are never ingested. Details: [docs/claude-code.md](docs/claude-code.md), [docs/invoke-mode.md](docs/invoke-mode.md), [docs/security.md](docs/security.md).
+
+**MCP only** (any MCP host, no hooks):
 
 ```bash
 pip install "ragnite[mcp,anthropic]"
@@ -106,7 +132,25 @@ Tools exposed: `recall` (verdict + packed context), `remember`, `remember_decisi
 }
 ```
 
-The intended agent loop: **`recall` before re-reading anything; obey the mode; `remember` whatever was expensive to figure out.**
+The intended agent loop: **`recall` before re-reading anything; obey the mode; `remember` whatever was expensive to figure out.** ([docs/agent-loop.md](docs/agent-loop.md) has the system-prompt snippet.)
+
+### A Claude Code session, before/after
+
+```
+user: "Where do we validate JWTs, and which algorithm?"
+
+WITHOUT Ragnite                          WITH Ragnite
+─ Glob src/**/auth*                      ─ recall("where are JWTs validated...")
+─ Read src/auth/jwt.py      (~2k tok)      -> mode: direct (0.83), ~60-token context:
+─ Read src/auth/middleware  (~3k tok)         - [code|sim 0.78|2d|src/auth/jwt.py:41]
+─ Grep "RS256|HS256"                            verify_token: validates RS256 JWTs...
+─ Read adr/009.md           (~1k tok)         - [decision|sim 0.71|4mo|adr/009.md]
+─ answer                                        jwt-alg: RS256; HS256 forbidden.
+                                          ─ answer directly, zero file reads
+≈ 6,000+ input tokens, every session     ≈ tens of tokens after the first session
+```
+
+The right-hand math is an estimate that scales with your repo, not a guarantee — but the mechanism is exact: `direct` mode means the agent is told *not* to re-read sources, and the packed context replaces them. After the session, the agent writes back what it learned (`remember_decision(..., supersedes=...)`), making the next session cheaper still.
 
 ## Install & quickstart
 
@@ -163,6 +207,20 @@ Set `RAGNITE_API_KEY` for bearer auth.
 
 Coding agents (Claude Code, autonomous loops) · LLM assistants · MCP servers · living documentation · project memory · semantic search · engineering teams that want decisions and tribal knowledge queryable with a confidence score.
 
+## What Ragnite is not
+
+- **Not a chatbot or an agent.** It never decides for the agent — it returns evidence plus a verdict; the host model does the talking.
+- **Not a vector database.** It *uses* one (built-in native store or Qdrant); the product is the memory typing, confidence and packing on top.
+- **Not magic grounding.** Confidence is computed from retrieval signals, not from verifying truth — garbage memories in, confidently-scored garbage out. Use `subject` keys and supersession to keep memory curated.
+- **Not an LSP or code-intelligence engine.** Code Memory indexes structure (symbols, routes, imports) for retrieval; it doesn't resolve types or call graphs.
+
+## When not to use Ragnite
+
+- One-shot scripts or stateless workloads — there is nothing to remember across runs.
+- Corpora that change wholesale on every query (live news feeds): caches and memory consolidate stability; total churn defeats both.
+- Sub-100k-token projects an agent can just read whole — memory overhead may not pay for itself until the project or session count grows.
+- Hard-realtime answers about data of record — query the system of record, don't recall a memory of it.
+
 ## Configuration
 
 | Variable | Default | Notes |
@@ -171,7 +229,8 @@ Coding agents (Claude Code, autonomous loops) · LLM assistants · MCP servers �
 | `RAGNITE_LLM` / `RAGNITE_LLM_MODEL` | `auto` / `claude-opus-4-8` | `anthropic` \| `openai` \| `none` |
 | `RAGNITE_STORE` | `native` | `qdrant` for scale-out (docs **and** memory bank) |
 | `RAGNITE_MEMORY_BUDGET` | `2000` | context-packer token budget |
-| `RAGNITE_CACHE_THRESHOLD` / `_TTL_DAYS` | `0.90` / `7` | semantic cache similarity & freshness |
+| `RAGNITE_CACHE_THRESHOLD` / `_TTL_DAYS` | `0.90` / `7` | verdict cache similarity & freshness |
+| `RAGNITE_ANSWER_CACHE` | `0` | `1` = cache final generated answers (zero-LLM-token hits) |
 | `RAGNITE_RERANKER` | `none` | `cohere` \| `voyage` \| `llm` |
 | `RAGNITE_CONTEXTUAL` | `0` | contextual retrieval at ingest |
 | `RAGNITE_DATA_DIR` | `.ragnite` | bank, semcache, doc collections, embedding cache |
@@ -181,6 +240,36 @@ Full list in [.env.example](.env.example). Confidence thresholds/weights are cod
 ## Scaling
 
 Native NumPy store (exact cosine, persisted) handles hundreds of thousands of records with zero infra; `RAGNITE_STORE=qdrant` moves both document collections and the memory bank to Qdrant for sharding/HA. `docker compose up` in [docker/](docker) ships API + Qdrant. Embedding cache (SQLite) makes re-indexing free; eval suite (`ragnite eval`, hit@k/MRR/nDCG + LLM-judge) keeps retrieval quality regression-tested in CI.
+
+## Benchmarks
+
+`uv run python benchmarks/bench.py` — fully offline (deterministic embedder), so the numbers measure engine overhead, not provider latency. On a laptop:
+
+```
+cold recall over 300 facts                     0.50 ms
+cached recall (verdict cache)                  0.04 ms   (11.8x)
+packed context reused per hit                  ~308 tokens
+code indexing (47 files / 298 symbols)         0.14 s
+incremental re-index (47 unchanged)            0.01 s
+retrieval quality fixture (hit@3)              1.00
+```
+
+With a real provider, cold recall adds one embedding API round-trip; cached recall still skips retrieval+scoring, and an AnswerCache hit also skips the LLM call.
+
+## Documentation
+
+| Doc | Covers |
+|---|---|
+| [docs/claude-code.md](docs/claude-code.md) | Invoke Mode for Claude Code: install, /ragnite commands, troubleshooting |
+| [docs/invoke-mode.md](docs/invoke-mode.md) | Event-driven live context injection — lifecycle and per-event behavior |
+| [docs/hooks.md](docs/hooks.md) | Exact hook event mapping and I/O contracts |
+| [docs/security.md](docs/security.md) | What is never stored, redaction patterns, operational boundaries |
+| [docs/agent-loop.md](docs/agent-loop.md) | The four-habit agent contract, system-prompt snippet, worked session |
+| [docs/confidence-policy.md](docs/confidence-policy.md) | Signals, formula, thresholds, tuning recipes, known limits |
+| [docs/semantic-cache.md](docs/semantic-cache.md) | Verdict cache vs AnswerCache — exact promises and invalidation |
+| [docs/code-memory.md](docs/code-memory.md) | What's extracted per language, incremental semantics, limits |
+| [docs/memory.md](docs/memory.md) | Memory taxonomy, supersession, recall pipeline overview |
+| [docs/architecture.md](docs/architecture.md) / [docs/deployment.md](docs/deployment.md) | Document-RAG pipeline · production checklist |
 
 ## Project layout
 

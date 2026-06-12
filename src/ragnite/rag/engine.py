@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ragnite.memory.semcache import AnswerCache
 
 from ragnite.embed.base import EmbeddingProvider
 from ragnite.errors import ConfigError
@@ -50,6 +54,7 @@ class RagEngine:
         chunk_overlap: int = 200,
         contextual: bool = False,
         bm25: bool = True,
+        answer_cache: AnswerCache | None = None,
     ) -> None:
         self.store = store
         self.embedder = embedder
@@ -57,6 +62,7 @@ class RagEngine:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.contextual = contextual
+        self.answer_cache = answer_cache
         self._bm25 = BM25Index() if bm25 else None
         self._bm25_dirty = True
         self._retriever = Retriever(store, embedder, self._bm25, reranker, retrieval)
@@ -79,6 +85,8 @@ class RagEngine:
             embeddings = await self.embedder.embed_batched([c.index_text for c in all_chunks])
         await self.store.upsert(all_chunks, embeddings)
         self._bm25_dirty = True
+        if self.answer_cache is not None:
+            await self.answer_cache.clear()  # the corpus changed; cached answers are stale
         return IngestStats(
             documents=len(docs),
             chunks=len(all_chunks),
@@ -150,19 +158,27 @@ class RagEngine:
         top_k: int | None = None,
         filters: Filters | None = None,
         history: list[Message] | None = None,
+        use_cache: bool = True,
     ) -> Answer:
+        if use_cache and self.answer_cache is not None and not history:
+            cached = await self.answer_cache.get(query)
+            if cached is not None:
+                return cached
         llm = self._require_llm()
         results = await self.search(query, top_k=top_k, filters=filters)
         if not results:
             return Answer(text="No indexed content matched this question.", chunks=[])
         response = await llm.complete(self._messages(query, results, history), system=ANSWER_SYSTEM)
-        return Answer(
+        answer = Answer(
             text=response.text,
             citations=self._citations(response.text, results),
             chunks=results,
             usage=response.usage,
             model=response.model,
         )
+        if use_cache and self.answer_cache is not None and not history:
+            await self.answer_cache.put(query, answer)
+        return answer
 
     async def ask_stream(
         self,
@@ -170,7 +186,14 @@ class RagEngine:
         top_k: int | None = None,
         filters: Filters | None = None,
         history: list[Message] | None = None,
+        use_cache: bool = True,
     ) -> AsyncIterator[StreamEvent]:
+        if use_cache and self.answer_cache is not None and not history:
+            cached = await self.answer_cache.get(query)
+            if cached is not None:
+                yield StreamEvent(type="delta", text=cached.text)
+                yield StreamEvent(type="answer", answer=cached)
+                return
         llm = self._require_llm()
         results = await self.search(query, top_k=top_k, filters=filters)
         if not results:
@@ -201,3 +224,5 @@ class RagEngine:
     async def clear(self) -> None:
         await self.store.clear()
         self._bm25_dirty = True
+        if self.answer_cache is not None:
+            await self.answer_cache.clear()

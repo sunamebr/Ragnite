@@ -1,8 +1,9 @@
 import asyncio
 
 from ragnite.embed.fake import FakeEmbedder
-from ragnite.memory.semcache import SemanticCache
+from ragnite.memory.semcache import AnswerCache, SemanticCache
 from ragnite.memory.types import MemoryAnswer
+from ragnite.types import Answer, Citation
 
 
 def _answer(query: str) -> MemoryAnswer:
@@ -54,3 +55,21 @@ async def test_clear(tmp_path):
     assert await cache.count() == 1
     await cache.clear()
     assert await cache.count() == 0
+
+
+async def test_answer_cache_returns_final_answer(tmp_path):
+    cache = AnswerCache(embedder=FakeEmbedder(), path=tmp_path / "ac", threshold=0.8)
+    final = Answer(
+        text="Mars is red because of iron oxide [1].",
+        citations=[Citation(marker=1, chunk_id="c1", doc_id="doc_mars", snippet="...")],
+    )
+    await cache.put("why is mars red", final)
+
+    hit = await cache.get("why is mars red")
+    assert hit is not None
+    assert hit.cached is True
+    assert hit.text == final.text
+    assert hit.citations[0].doc_id == "doc_mars"
+    assert hit.chunks == []  # heavy chunk payloads are not cached
+
+    assert await cache.get("how do volcanoes form on jupiter moons") is None

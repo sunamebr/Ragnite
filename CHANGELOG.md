@@ -3,6 +3,79 @@
 All notable changes to Ragnite are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com); versioning follows SemVer.
 
+## [0.3.0] - 2026-06-12
+
+### Added — Invoke Mode for Claude Code (event-driven live context injection)
+- `ragnite claude install`: wires the `/ragnite` slash skill
+  (`.claude/skills/ragnite/SKILL.md`), the ragnite MCP server (`.mcp.json`),
+  session hooks (`.claude/settings.local.json` — merged idempotently, existing
+  hooks/permissions untouched), `.ragnite/config.toml` and
+  `.ragnite/session.json`. Hook/MCP commands use the absolute interpreter.
+- `/ragnite` skill: `init`, `invoke`, `pause`, `status`, `recall`, `remember`,
+  `forget` — plus a behavior contract for obeying injected context modes.
+- `ragnite claude init` (bootstrap): detects the repo root, indexes code
+  (`.ragniteignore`-aware) and README/docs/configs (redacted), seeds initial
+  memories — **inferences are marked `inferred=true` with reduced authority,
+  never definitive** — runs a smoke recall, prints stats. Re-runs replace
+  inferred records instead of duplicating.
+- `ragnite claude invoke|pause|status`: session state in
+  `.ragnite/session.json`, install validation, briefing injection.
+- Hook handlers (`ragnite claude hook <event>`), all fail-safe (log to
+  `.ragnite/hooks.log`, never break a session):
+  - **SessionStart**: project briefing (brief, active decisions, constraints,
+    counts); on `source=compact`, captures the compaction summary as a
+    *candidate* episode before re-grounding.
+  - **UserPromptSubmit**: recall on the (redacted) prompt → injects a
+    `<ragnite-context mode=... confidence=...>` block with suggestion,
+    evidence and sources; silent on `refuse_guess`/low confidence.
+  - **PreToolUse** (Grep|Glob): advisory by default — never blocks; opt-in
+    `strict` mode denies broad searches that memory answers `direct`.
+  - **PostToolUse** (Edit/Write/...): incremental Code Memory re-index of the
+    changed file + semantic-cache invalidation. (Bash): learns candidate
+    episodes from test results and failing commands, superseding repeats.
+- `CodeMemory.index_file()` (single-file incremental re-index) and
+  `index_repo(ignore=...)`; loaders now also skip `vendor/` and `.claude/`.
+- Security layer (`ragnite.claude.redact`): secret redaction (API keys, AWS,
+  GitHub/GitLab/Slack tokens, JWTs, bearer headers, private-key blocks,
+  credential assignments) applied to everything stored from live sessions;
+  sensitive files (`.env*`, keys, credentials) never ingested;
+  `.ragniteignore` support.
+- Docs: `claude-code.md`, `invoke-mode.md`, `hooks.md`, `security.md`.
+- 26 new tests (99 total): installer merge safety/idempotency, prompt
+  injection contract, episodic learning + supersession, incremental re-index
+  + cache invalidation, strict-mode denial, redaction, bootstrap seeding.
+
+## [0.2.1] - 2026-06-12
+
+Hardening pass: consistency, claim accuracy, coverage, demonstrability.
+
+### Fixed
+- FastAPI app version now follows the package version (was hardcoded `0.1.0`).
+- CLI help repositioned: "Confidence-aware RAG memory engine for LLMs and
+  coding agents" (was the pre-0.2 document-RAG pitch).
+- **Semantic cache claim corrected**: the verdict cache saves
+  retrieval/scoring/packing and reuses the packed context — it does *not* by
+  itself save generation tokens. Docs and README now state the exact contract.
+- HTTP `/v1/ingest` honors client-provided document `id`s (stable ids for
+  eval datasets and upsert-by-id).
+
+### Added
+- **`AnswerCache`** (opt-in, `RAGNITE_ANSWER_CACHE=1`): caches *final
+  generated answers* for `RagEngine.ask`/`ask_stream` — a hit is genuinely
+  zero LLM tokens (`Answer.cached`). Stricter threshold (0.93) and shorter
+  TTL (3d) than the verdict cache; invalidated on ingest/clear.
+- 13 new tests (73 total): FastAPI version/auth/memory endpoints, MCP `recall`
+  JSON contract (`recall_payload`), answer-cache LLM-skip + invalidation,
+  verdict-cache invalidation on `index_repo`/`forget`, conflict→supersession
+  resolution flow, incremental indexing against Ragnite's own source tree.
+- `benchmarks/bench.py`: offline micro-benchmarks (cold vs cached recall,
+  code-indexing time, retrieval-quality fixture).
+- Docs: `agent-loop.md`, `confidence-policy.md`, `semantic-cache.md`,
+  `code-memory.md`; README gained "What Ragnite is not", "When not to use",
+  a before/after Claude Code session, and measured benchmark numbers.
+- `.github/repo-metadata.md`: recommended GitHub description, topics and
+  social-preview text.
+
 ## [0.2.0] - 2026-06-12
 
 ### Changed
