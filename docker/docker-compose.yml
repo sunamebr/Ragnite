@@ -1,0 +1,29 @@
+services:
+  ragnite:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      RAGNITE_STORE: qdrant
+      QDRANT_URL: http://qdrant:6333
+      # Provider keys — set in a .env file next to this compose file:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      RAGNITE_API_KEY: ${RAGNITE_API_KEY:-}
+    volumes:
+      - ragnite-data:/data
+    depends_on:
+      - qdrant
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
+volumes:
+  ragnite-data:
+  qdrant-data:
