@@ -43,6 +43,26 @@ class AskRequest(SearchRequest):
     stream: bool = False
 
 
+class RememberRequest(BaseModel):
+    text: str
+    kind: str = "fact"  # fact | decision | episode
+    subject: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    source: str | None = None
+    supersedes: str | None = None
+
+
+class RecallRequest(BaseModel):
+    query: str
+    kinds: list[str] | None = None  # fact | decision | episode | code
+    budget_tokens: int | None = None
+    use_cache: bool = True
+
+
+class IndexCodeRequest(BaseModel):
+    path: str
+
+
 def create_app(engine: RagEngine | None = None, config: RagniteConfig | None = None):
     if FastAPI is None:
         raise MissingDependencyError("fastapi", "server")
@@ -102,5 +122,40 @@ def create_app(engine: RagEngine | None = None, config: RagniteConfig | None = N
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    # -- confidence-aware memory ------------------------------------------------
+
+    from ragnite.config import build_memory_engine
+    from ragnite.memory.types import MemoryKind
+
+    memory = build_memory_engine(cfg)
+
+    @app.post("/v1/memory/remember", dependencies=[Depends(require_auth)])
+    async def memory_remember(body: RememberRequest) -> dict:
+        record = await memory.remember(
+            body.text,
+            kind=body.kind,
+            subject=body.subject,
+            tags=body.tags,
+            source=body.source,
+            supersedes=body.supersedes,
+        )
+        return record.model_dump()
+
+    @app.post("/v1/memory/recall", dependencies=[Depends(require_auth)])
+    async def memory_recall(body: RecallRequest) -> dict:
+        kinds = [MemoryKind(k) for k in body.kinds] if body.kinds else None
+        answer = await memory.recall(
+            body.query, kinds=kinds, budget_tokens=body.budget_tokens, use_cache=body.use_cache
+        )
+        return answer.model_dump()
+
+    @app.post("/v1/memory/index_code", dependencies=[Depends(require_auth)])
+    async def memory_index_code(body: IndexCodeRequest) -> dict:
+        return (await memory.index_repo(body.path)).model_dump()
+
+    @app.get("/v1/memory/stats", dependencies=[Depends(require_auth)])
+    async def memory_stats() -> dict:
+        return await memory.stats()
 
     return app

@@ -1,5 +1,9 @@
 # Ragnite Architecture
 
+> This file covers the document-RAG pipeline. The memory & conviction layer
+> (typed memory, confidence scoring, answer modes, semantic cache, code
+> memory) is documented in [memory.md](memory.md).
+
 ## Design principles
 
 1. **Hybrid by default.** Dense-only retrieval fails on exact identifiers,

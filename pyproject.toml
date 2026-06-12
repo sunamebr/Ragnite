@@ -4,13 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ragnite"
-version = "0.1.0"
-description = "Production-grade RAG: hybrid retrieval, contextual embeddings, citations, vector memory, MCP server."
+version = "0.2.0"
+description = "Confidence-aware RAG memory engine for LLMs and coding agents: typed memory (fact/decision/episode/code), confidence scoring, answer modes, context packing, semantic cache, hybrid retrieval, MCP server."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [{ name = "sunamebr" }]
-keywords = ["rag", "retrieval", "llm", "embeddings", "vector-search", "mcp", "anthropic", "claude"]
+keywords = [
+    "rag", "retrieval", "llm", "embeddings", "vector-search", "mcp", "anthropic", "claude",
+    "memory", "agent-memory", "semantic-cache", "confidence", "coding-agents",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",

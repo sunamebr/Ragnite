@@ -2,7 +2,9 @@
 
 # 🔥 Ragnite
 
-**Production-grade Retrieval-Augmented Generation — hybrid search, contextual retrieval, citations, vector memory, and an MCP server. Batteries included.**
+**Confidence-Aware RAG Memory Engine for LLMs and coding agents.**
+
+Typed memory · confidence scoring · answer modes · token-budgeted context packing · semantic cache · hybrid retrieval · MCP server
 
 [![CI](https://github.com/sunamebr/Ragnite/actions/workflows/ci.yml/badge.svg)](https://github.com/sunamebr/Ragnite/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org)
@@ -13,118 +15,84 @@
 
 ---
 
-Most RAG stacks are a demo that falls apart in production: dense-only retrieval that misses exact terms, no citations, no eval loop, a hard dependency on one vendor. Ragnite is the opposite — a small, typed, async core built around the techniques that actually move retrieval quality, with clean seams for every provider.
+## The problem
 
-## Why Ragnite
+Every session, your coding agent re-reads the repo. Re-derives the architecture. Re-discovers that the deploy runs on Fridays, that you chose gRPC over REST six months ago, that the flaky auth test was fixed by freezing the clock. **Tokens burned re-analyzing what should already be consolidated** — and worse, the agent answers with the same false confidence whether it knows or guesses.
 
-| | |
-|---|---|
-| 🔎 **Hybrid retrieval by default** | Dense embeddings + built-in BM25, fused with Reciprocal Rank Fusion. Lexical recall for identifiers and names, semantic recall for paraphrases. |
-| 🧠 **Contextual retrieval** | Optional LLM-written context per chunk (the Anthropic technique), with prompt caching — dramatically fewer retrieval misses on ambiguous chunks. |
-| 🎯 **Reranking** | Cohere, Voyage, or listwise LLM reranking as a second precision stage. |
-| 📌 **Citations, always** | Answers are grounded in numbered sources and return structured `Citation` objects — verifiable by construction. |
-| 💾 **Vector memory** | `remember()` / `recall()` persistent semantic memory — give any agent long-term memory. |
-| 🔌 **MCP server** | One command exposes search, ask, ingest and memory to Claude Code, Claude Desktop, or any MCP host. |
-| 📈 **Evaluation built in** | hit@k, MRR, nDCG plus LLM-judge faithfulness and relevancy. Measure before you ship. |
-| 🧱 **Zero-config to global scale** | Runs offline with BM25 + native NumPy store; flips to Qdrant + Docker + API auth for production. Every provider is swappable. |
-| ⚡ **Async-first, fully typed** | pydantic v2 models end to end; streaming (SSE) answers; SQLite embedding cache so re-ingestion is free. |
-
-## Install
-
-```bash
-pip install ragnite                      # core (BM25 + native store, zero config)
-pip install "ragnite[anthropic]"         # + Claude answers
-pip install "ragnite[all]"               # + server, MCP, Qdrant, PDF/DOCX loaders
-```
-
-## Quickstart
-
-**60 seconds, no API keys** — keyword search over your files:
-
-```bash
-ragnite ingest ./docs
-ragnite query "how does billing work?"
-```
-
-**Full pipeline** — semantic + keyword retrieval, grounded streaming answers:
-
-```bash
-export VOYAGE_API_KEY=...        # embeddings (recommended with Claude)
-export ANTHROPIC_API_KEY=...     # generation
-
-ragnite ingest ./docs
-ragnite ask "how does billing work?"
-```
-
-**As a library:**
+Ragnite is the missing layer: a **memory and conviction engine**. Agents write consolidated knowledge once; on every question, one `recall()` returns the *smallest sufficient context* plus an explicit verdict on how much to trust it.
 
 ```python
-import asyncio
-from ragnite import build_engine
+from ragnite import build_memory_engine
 
-async def main():
-    engine = build_engine()                      # wired from env vars
-    await engine.ingest_path("./docs")
+memory = build_memory_engine()
 
-    answer = await engine.ask("How does billing work?")
-    print(answer.text)
-    for c in answer.citations:
-        print(f"[{c.marker}] {c.source}")
+await memory.remember_decision("Services communicate over gRPC.", subject="api-style")
+await memory.remember_fact("The database listens on port 5432.", subject="db-port")
+await memory.remember_episode("Fixed flaky auth test by freezing the clock.")
+await memory.index_repo(".")          # Code Memory: files, symbols, endpoints, deps
 
-asyncio.run(main())
-```
-
-Or compose it explicitly — every piece is injectable:
-
-```python
-from ragnite import RagEngine, NativeVectorStore, VoyageEmbedder, LLMReranker
-from ragnite.llm import AnthropicChat
-
-llm = AnthropicChat(model="claude-opus-4-8")
-engine = RagEngine(
-    store=NativeVectorStore(".ragnite/collections/default"),
-    embedder=VoyageEmbedder(),
-    llm=llm,
-    reranker=LLMReranker(llm),
-    contextual=True,                 # Anthropic-style contextual retrieval
-)
+answer = await memory.recall("how do services talk to each other?")
+answer.mode        # "direct" — strong consolidated evidence
+answer.confidence  # 0.86
+answer.context     # token-budgeted evidence pack, ready to inject
+answer.suggestion  # "Answer directly from the provided context — do not re-analyze."
 ```
 
 ## Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Ingest
-        A[Loaders<br/>md / code / html / pdf / docx] --> B[Chunkers<br/>recursive / markdown / code]
-        B --> C[Contextual Enricher<br/>optional, LLM + prompt cache]
-        C --> D[Embeddings<br/>Voyage / OpenAI-compat / local]
+flowchart TB
+    subgraph Memories["Typed Memory Bank"]
+        F["📌 Factual Memory<br/>stable project/domain truths"]
+        D["🏛️ Decision Memory<br/>architectural choices, supersession chains"]
+        E["📓 Episodic Memory<br/>bugs fixed, failed attempts, progress"]
+        C["🧩 Code Memory<br/>files, symbols, endpoints, deps, tests"]
     end
-    D --> E[(Vector Store<br/>Native NumPy / Qdrant)]
-    B --> F[(BM25 Index)]
-    subgraph Query
-        Q[Query] --> G[Dense Search]
-        Q --> H[BM25 Search]
-        E --> G
-        F --> H
-        G --> I[RRF Fusion]
-        H --> I
-        I --> J[Reranker<br/>Cohere / Voyage / LLM]
-        J --> K[Claude / any LLM<br/>grounded answer + citations]
-    end
-    K --> L[Answer + Citations]
-    M[MCP Server] -.-> Q
-    N[FastAPI / SSE] -.-> Q
-    O[Vector Memory<br/>remember / recall] -.-> E
+    Q[query] --> SC{Semantic Cache<br/>equivalent question?}
+    SC -- hit --> OUT
+    SC -- miss --> R[Hybrid Recall<br/>dense + BM25]
+    Memories --> R
+    R --> CS[Confidence Scorer<br/>similarity · sources · agreement<br/>recency · authority · conflicts]
+    CS --> AM{Answer Mode}
+    AM --> CP[Context Packer<br/>smallest context under token budget]
+    CP --> OUT["MemoryAnswer<br/>mode + confidence + context + suggestion"]
+    OUT -. cache .-> SC
 ```
 
-## MCP — plug Ragnite into Claude
+### Answer modes — the conviction contract
+
+| Mode | Meaning | What the agent should do |
+|---|---|---|
+| `direct` | Strong consolidated evidence | Answer from context; **do not re-analyze** |
+| `cautious` | Partial evidence | Answer with explicit caveats and attribution |
+| `ask_clarification` | Conflicting/ambiguous memory entries | Ask the user one targeted question |
+| `search_more` | Weak evidence | Retrieve more (code search, docs, web) first |
+| `refuse_guess` | No reliable basis | Say "I don't know" instead of hallucinating |
+
+### Confidence Scorer
+
+Confidence blends seven signals — **top similarity, mean similarity, source count, dense↔keyword agreement, recency (per-kind half-life), source authority, conflict detection** — and is hard-capped by relevance: fresh, authoritative sources can never make a weak match look trustworthy. Conflicts (two active entries claiming the same `subject`) force `ask_clarification` until a decision supersedes the loser.
+
+### Context Packer
+
+Greedy value-ordered packing under a token budget (default 2000), near-duplicate suppression, compact one-line headers with kind/similarity/age/provenance. The LLM gets evidence, not prose.
+
+### Semantic Cache
+
+Queries are cached by embedding; an equivalent question returns the previous verdict + context with **zero retrieval, zero scoring, zero LLM tokens**. TTL-bounded, invalidated on memory writes.
+
+### Code Memory
+
+`index_repo()` parses the repository into memory: Python via AST (functions, classes, methods, docstrings, imports, FastAPI/Flask-style routes), other languages via definition-boundary extraction. Incremental — unchanged files are hash-skipped, deleted files evicted. "Where is auth handled?" becomes one recall instead of a directory crawl.
+
+## Plug it into Claude Code (MCP)
 
 ```bash
 pip install "ragnite[mcp,anthropic]"
-claude mcp add ragnite -- ragnite mcp        # Claude Code
+claude mcp add ragnite -- ragnite mcp
 ```
 
-Claude Desktop (`claude_desktop_config.json`):
+Tools exposed: `recall` (verdict + packed context), `remember`, `remember_decision` (with supersession), `index_repo`, `forget`, plus document RAG (`search`, `ask`, `ingest_*`) and `stats`. Claude Desktop config:
 
 ```json
 {
@@ -138,94 +106,112 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-Tools exposed: `search`, `ask`, `ingest_text`, `ingest_path`, `remember`, `recall`, `stats`. The memory tools give your agent **persistent vector memory across sessions**.
+The intended agent loop: **`recall` before re-reading anything; obey the mode; `remember` whatever was expensive to figure out.**
+
+## Install & quickstart
+
+```bash
+pip install ragnite                  # core — runs offline (BM25 + native store)
+pip install "ragnite[all]"           # + Claude, server, MCP, Qdrant, PDF/DOCX
+```
+
+```bash
+# memory & conviction
+ragnite index-code .
+ragnite remember "We deploy Fridays at noon" --kind decision --subject deploy-window
+ragnite recall "when do we deploy?"
+#  mode: direct  confidence: 0.84  tokens: 31
+#  - [decision|sim 0.79|today] deploy-window: We deploy Fridays at noon
+
+# document RAG (grounded answers with [n] citations)
+ragnite ingest ./docs
+ragnite ask "how does billing work?"
+```
+
+Embeddings: Voyage AI (recommended with Claude), any OpenAI-compatible endpoint (OpenAI, Ollama, vLLM, Jina), or local sentence-transformers. Generation: Claude via the official SDK (default `claude-opus-4-8`) or OpenAI-compatible. **No keys at all? Everything still works on BM25.**
+
+## Document RAG (the second half)
+
+The classic pipeline is still here and production-grade: loaders (md/code/html/json/pdf/docx) → recursive/markdown/code-aware chunking → optional **contextual retrieval** (Anthropic technique, prompt-cached) → hybrid dense+BM25 with **RRF fusion** → optional reranking (Cohere/Voyage/LLM listwise) → **grounded answers with structured citations**, sync or SSE streaming.
+
+```python
+from ragnite import build_engine
+
+engine = build_engine()
+await engine.ingest_path("./docs")
+result = await engine.ask("How does billing work?")   # result.citations -> [Citation(...)]
+```
 
 ## HTTP API
 
 ```bash
-pip install "ragnite[server]"
-ragnite serve --port 8000
+pip install "ragnite[server]" && ragnite serve
 ```
 
 | Method | Route | Description |
 |---|---|---|
-| `GET` | `/healthz` | Liveness probe |
-| `GET` | `/v1/stats` | Index statistics |
-| `POST` | `/v1/ingest` | `{"documents": [{"text", "source?", "metadata?"}]}` |
-| `POST` | `/v1/search` | `{"query", "top_k?", "filters?"}` → scored chunks |
-| `POST` | `/v1/ask` | `{"query", "stream?": true}` → answer + citations (SSE when streaming) |
+| `POST` | `/v1/memory/recall` | `{"query"}` → mode + confidence + packed context |
+| `POST` | `/v1/memory/remember` | `{"text", "kind", "subject?", "supersedes?"}` |
+| `POST` | `/v1/memory/index_code` | `{"path"}` → incremental code indexing |
+| `GET` | `/v1/memory/stats` | records by kind, cache entries, policy |
+| `POST` | `/v1/ingest` / `/v1/search` / `/v1/ask` | document RAG (SSE on `stream: true`) |
+| `GET` | `/healthz` / `/v1/stats` | ops |
 
-Set `RAGNITE_API_KEY` to require `Authorization: Bearer <key>`.
+Set `RAGNITE_API_KEY` for bearer auth.
 
-## Evaluation
+## Who is this for
 
-Create `eval.jsonl`:
-
-```json
-{"query": "Why is Mars red?", "relevant_ids": ["doc_mars"]}
-{"query": "largest planet", "relevant_ids": ["doc_jupiter"]}
-```
-
-```bash
-ragnite eval eval.jsonl              # hit@k, MRR, nDCG
-ragnite eval eval.jsonl --judge      # + LLM-judge faithfulness & relevancy
-```
-
-Wire it into CI and treat retrieval quality like a test suite.
+Coding agents (Claude Code, autonomous loops) · LLM assistants · MCP servers · living documentation · project memory · semantic search · engineering teams that want decisions and tribal knowledge queryable with a confidence score.
 
 ## Configuration
 
-Everything via env vars (or `.env` — see [.env.example](.env.example)):
-
 | Variable | Default | Notes |
 |---|---|---|
-| `RAGNITE_EMBEDDER` | `auto` | `voyage` \| `openai` \| `local` \| `fake` \| `none`; auto-detects by API key |
-| `RAGNITE_LLM` | `auto` | `anthropic` \| `openai` \| `none` |
-| `RAGNITE_LLM_MODEL` | `claude-opus-4-8` | any Claude / OpenAI-compatible model |
-| `RAGNITE_STORE` | `native` | `qdrant` for scale-out |
+| `RAGNITE_EMBEDDER` | `auto` | `voyage` \| `openai` \| `local` \| `fake` \| `none` (auto-detects by key) |
+| `RAGNITE_LLM` / `RAGNITE_LLM_MODEL` | `auto` / `claude-opus-4-8` | `anthropic` \| `openai` \| `none` |
+| `RAGNITE_STORE` | `native` | `qdrant` for scale-out (docs **and** memory bank) |
+| `RAGNITE_MEMORY_BUDGET` | `2000` | context-packer token budget |
+| `RAGNITE_CACHE_THRESHOLD` / `_TTL_DAYS` | `0.90` / `7` | semantic cache similarity & freshness |
 | `RAGNITE_RERANKER` | `none` | `cohere` \| `voyage` \| `llm` |
-| `RAGNITE_CONTEXTUAL` | `0` | `1` enables contextual retrieval at ingest |
-| `RAGNITE_CHUNK_SIZE` / `_OVERLAP` | `1600` / `200` | characters |
-| `RAGNITE_DATA_DIR` | `.ragnite` | store, embedding cache, memory |
-| `OPENAI_BASE_URL` | — | point at Ollama / vLLM / Groq for local & OSS models |
+| `RAGNITE_CONTEXTUAL` | `0` | contextual retrieval at ingest |
+| `RAGNITE_DATA_DIR` | `.ragnite` | bank, semcache, doc collections, embedding cache |
 
-## Scaling up
+Full list in [.env.example](.env.example). Confidence thresholds/weights are code-level: `ConfidencePolicy(direct_threshold=..., w_recency=...)`.
 
-```bash
-cd docker && docker compose up --build
-```
+## Scaling
 
-Ships the Ragnite API + Qdrant with persistent volumes. The native store handles hundreds of thousands of chunks on a single node (exact search, NumPy); switch `RAGNITE_STORE=qdrant` when you need sharding, replication, or multi-node scale. The embedding cache makes re-indexing idempotent and cheap; stateless API nodes scale horizontally behind a load balancer.
+Native NumPy store (exact cosine, persisted) handles hundreds of thousands of records with zero infra; `RAGNITE_STORE=qdrant` moves both document collections and the memory bank to Qdrant for sharding/HA. `docker compose up` in [docker/](docker) ships API + Qdrant. Embedding cache (SQLite) makes re-indexing free; eval suite (`ragnite eval`, hit@k/MRR/nDCG + LLM-judge) keeps retrieval quality regression-tested in CI.
 
 ## Project layout
 
 ```
 src/ragnite/
-├── ingest/      loaders + chunkers (recursive, markdown-aware, code-aware)
-├── embed/       Voyage, OpenAI-compat, local, fake + SQLite cache
+├── memory/      ★ the conviction layer
+│   ├── bank.py        typed memory bank (fact/decision/episode/code)
+│   ├── scorer.py      confidence signals + answer-mode policy
+│   ├── packer.py      token-budgeted context assembly
+│   ├── semcache.py    semantic answer cache
+│   ├── code_index.py  incremental repository indexing
+│   └── engine.py      MemoryEngine.recall() -> MemoryAnswer
+├── ingest/      loaders + chunkers
+├── embed/       Voyage / OpenAI-compat / local / fake + SQLite cache
 ├── store/       native NumPy store, Qdrant adapter
-├── retrieve/    BM25, RRF fusion, rerankers, retriever orchestration
+├── retrieve/    BM25, RRF fusion, rerankers
 ├── llm/         Anthropic (official SDK), OpenAI-compatible
-├── rag/         engine, prompts, contextual retrieval, memory
+├── rag/         document RAG engine, contextual retrieval, prompts
 ├── eval/        IR metrics + LLM-judge
-├── server/      FastAPI app + MCP server
-└── cli.py       ragnite ingest | query | ask | serve | mcp | eval
+└── server/      FastAPI + MCP
 ```
 
 ## Roadmap
 
-- [ ] pgvector, Milvus and Weaviate store adapters
-- [ ] GraphRAG-style entity/community indexing
-- [ ] Multi-query expansion + HyDE in the retriever
-- [ ] Parent-document / small-to-big retrieval
-- [ ] Multi-tenant collections + per-tenant auth in the server
-- [ ] Async ingestion workers (queue-based) for very large corpora
-- [ ] OpenTelemetry tracing
+- [ ] Auto-consolidation: distill episodes into facts/decisions on a schedule
+- [ ] LLM-assisted conflict resolution and memory dedup
+- [ ] Memory decay & promotion policies (episode → fact)
+- [ ] pgvector / Milvus store adapters; GraphRAG-style entity linking
+- [ ] Multi-tenant memory banks with per-tenant auth
+- [ ] OpenTelemetry tracing; token-savings analytics per agent
 
-## Contributing
+## Contributing & license
 
-PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The test suite runs fully offline (`uv sync --group dev && uv run pytest`).
-
-## License
-
-[MIT](LICENSE) © sunamebr
+PRs welcome — [CONTRIBUTING.md](CONTRIBUTING.md). Test suite runs fully offline: `uv sync --group dev && uv run pytest`. [MIT](LICENSE) © sunamebr

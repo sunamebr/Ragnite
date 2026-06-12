@@ -9,9 +9,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from ragnite.memory.engine import MemoryEngine
 
 from ragnite.embed.base import EmbeddingProvider
 from ragnite.embed.cache import EmbeddingCache
@@ -49,6 +53,11 @@ class RagniteConfig(BaseModel):
 
     retrieval: RetrievalConfig = RetrievalConfig()
 
+    # memory engine
+    cache_threshold: float = 0.90  # semantic cache similarity cutoff
+    cache_ttl_days: float = 7.0
+    memory_budget_tokens: int = 2000  # default context-packer budget
+
     host: str = "127.0.0.1"
     port: int = 8000
     api_key: str | None = None  # bearer token for the HTTP API; None disables auth
@@ -70,6 +79,9 @@ class RagniteConfig(BaseModel):
             contextual=_env("RAGNITE_CONTEXTUAL", "0") in {"1", "true", "yes"},
             chunk_size=int(_env("RAGNITE_CHUNK_SIZE", "1600")),
             chunk_overlap=int(_env("RAGNITE_CHUNK_OVERLAP", "200")),
+            cache_threshold=float(_env("RAGNITE_CACHE_THRESHOLD", "0.90")),
+            cache_ttl_days=float(_env("RAGNITE_CACHE_TTL_DAYS", "7")),
+            memory_budget_tokens=int(_env("RAGNITE_MEMORY_BUDGET", "2000")),
             host=_env("RAGNITE_HOST", "127.0.0.1"),
             port=int(_env("RAGNITE_PORT", "8000")),
             api_key=_env("RAGNITE_API_KEY") or None,
@@ -194,5 +206,36 @@ def build_engine(cfg: RagniteConfig | None = None) -> RagEngine:
 
 
 def build_memory(cfg: RagniteConfig | None = None) -> VectorMemory:
+    """Legacy flat vector memory. Prefer :func:`build_memory_engine`."""
     cfg = cfg or RagniteConfig.from_env()
     return VectorMemory(embedder=build_embedder(cfg), path=cfg.data_dir / "memory")
+
+
+def build_memory_engine(cfg: RagniteConfig | None = None) -> MemoryEngine:
+    """Confidence-aware memory engine: typed memory bank + scorer + packer + semantic cache."""
+    from ragnite.memory.bank import MemoryBank
+    from ragnite.memory.engine import MemoryEngine
+    from ragnite.memory.semcache import SemanticCache
+
+    cfg = cfg or RagniteConfig.from_env()
+    embedder = build_embedder(cfg)
+
+    if cfg.store == "qdrant":
+        from ragnite.store.qdrant import QdrantVectorStore
+
+        bank_store: VectorStore = QdrantVectorStore(
+            url=cfg.qdrant_url,
+            collection=f"ragnite_memory_{cfg.collection}",
+            api_key=_env("QDRANT_API_KEY") or None,
+        )
+        bank = MemoryBank(embedder=embedder, store=bank_store)
+    else:
+        bank = MemoryBank(embedder=embedder, path=cfg.data_dir / "memory_bank")
+
+    cache = SemanticCache(
+        embedder=embedder,
+        path=cfg.data_dir / "semcache",
+        threshold=cfg.cache_threshold,
+        ttl_days=cfg.cache_ttl_days,
+    )
+    return MemoryEngine(bank=bank, cache=cache, default_budget_tokens=cfg.memory_budget_tokens)

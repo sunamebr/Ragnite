@@ -176,5 +176,84 @@ def clear(
     asyncio.run(run())
 
 
+@app.command()
+def remember(
+    text: str = typer.Argument(..., help="The knowledge to store."),
+    kind: str = typer.Option("fact", help="fact | decision | episode"),
+    subject: str = typer.Option(None, help="Topic key (e.g. 'db-port') — enables conflict detection."),
+    source: str = typer.Option(None, help="Provenance (file, ADR, ticket)."),
+    supersedes: str = typer.Option(None, help="Memory id this entry replaces."),
+) -> None:
+    """Store a memory record (Factual / Decision / Episodic memory)."""
+
+    async def run() -> None:
+        from ragnite.config import build_memory_engine
+
+        record = await build_memory_engine(RagniteConfig.from_env()).remember(
+            text, kind=kind, subject=subject, source=source, supersedes=supersedes
+        )
+        label = f" (subject: {subject})" if subject else ""
+        console.print(f"[green]+[/green] {record.kind.value} {record.id}{label}")
+
+    asyncio.run(run())
+
+
+_MODE_COLORS = {
+    "direct": "green",
+    "cautious": "yellow",
+    "ask_clarification": "magenta",
+    "search_more": "cyan",
+    "refuse_guess": "red",
+}
+
+
+@app.command()
+def recall(
+    query: str = typer.Argument(..., help="What to recall."),
+    budget: int = typer.Option(2000, help="Token budget for the packed context."),
+    kinds: str = typer.Option(None, help="Comma-separated filter: fact,decision,episode,code."),
+    no_cache: bool = typer.Option(False, "--no-cache", help="Bypass the semantic cache."),
+) -> None:
+    """Recall from memory: packed context + confidence + answer mode."""
+
+    async def run() -> None:
+        from ragnite.config import build_memory_engine
+        from ragnite.memory import MemoryKind
+
+        kind_list = [MemoryKind(k.strip()) for k in kinds.split(",")] if kinds else None
+        answer = await build_memory_engine(RagniteConfig.from_env()).recall(
+            query, kinds=kind_list, budget_tokens=budget, use_cache=not no_cache
+        )
+        color = _MODE_COLORS[answer.mode]
+        cached = "  [dim](cached)[/dim]" if answer.cached else ""
+        console.print(
+            f"mode: [{color}]{answer.mode}[/{color}]  confidence: {answer.confidence:.2f}  "
+            f"tokens: {answer.tokens}{cached}"
+        )
+        console.print(f"[dim]{answer.suggestion}[/dim]")
+        if answer.context:
+            console.print(answer.context)
+
+    asyncio.run(run())
+
+
+@app.command(name="index-code")
+def index_code(
+    path: str = typer.Argument(".", help="Repository root to index into Code Memory."),
+) -> None:
+    """Index a repository into Code Memory (incremental — unchanged files skipped)."""
+
+    async def run() -> None:
+        from ragnite.config import build_memory_engine
+
+        stats = await build_memory_engine(RagniteConfig.from_env()).index_repo(path)
+        console.print(
+            f"[green]+[/green] indexed {stats.files_indexed} file(s) / {stats.symbols} symbol(s); "
+            f"skipped {stats.files_skipped} unchanged; removed {stats.files_removed} stale"
+        )
+
+    asyncio.run(run())
+
+
 if __name__ == "__main__":
     app()
