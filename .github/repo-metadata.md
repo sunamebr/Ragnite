@@ -1,4 +1,7 @@
-# GitHub repository metadata (apply in Settings, or via `gh`)
+# GitHub repository metadata
+
+> **Status: applied 2026-06-12** (description + 16 topics set via the REST
+> API). This file remains the source of truth for future edits.
 
 GitHub repo description/topics can't live in the repo itself — apply these
 once in **Settings → General** (description/website) and the ⚙️ next to
